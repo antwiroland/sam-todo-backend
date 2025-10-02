@@ -1,0 +1,259 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless To-Do Application - Working Version
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 30
+    MemorySize: 256
+Resources:
+  TodoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: TodoUserPool
+      AutoVerifiedAttributes:
+      - email
+      UsernameAttributes:
+      - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+      LambdaConfig:
+        PostConfirmation:
+          Fn::GetAtt:
+          - PostConfirmationFunction
+          - Arn
+  TodoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId:
+        Ref: TodoUserPool
+      ClientName: TodoAppClient
+      GenerateSecret: false
+      ExplicitAuthFlows:
+      - ALLOW_USER_PASSWORD_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+      - ALLOW_USER_SRP_AUTH
+      SupportedIdentityProviders:
+      - COGNITO
+  TodoTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TodoTasks
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: UserId
+        AttributeType: S
+      - AttributeName: TaskId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: UserId
+        KeyType: HASH
+      - AttributeName: TaskId
+        KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+  TaskExpiryTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: TodoTaskExpiryNotifications
+  TodoApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      Cors:
+        AllowMethods: '''GET,POST,PUT,DELETE,OPTIONS'''
+        AllowHeaders: '''Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'''
+        AllowOrigin: '''*'''
+        AllowCredentials: '''true'''
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn:
+              Fn::GetAtt:
+              - TodoUserPool
+              - Arn
+  TodoApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: TodoApiHandler
+      CodeUri: TodoApiFunction
+      Handler: app.lambda_handler
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: TodoTable
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: TodoTable
+      Events:
+        GetTasks:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: get
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+        AddTask:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: post
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+        UpdateTask:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: put
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+        DeleteTask:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: delete
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+    Metadata:
+      SamResourceId: TodoApiFunction
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: TodoAuthHandler
+      CodeUri: AuthFunction
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          CLIENT_ID:
+            Ref: TodoUserPoolClient
+      Events:
+        Auth:
+          Type: Api
+          Properties:
+            Path: /auth
+            Method: post
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: NONE
+        Register:
+          Type: Api
+          Properties:
+            Path: /register
+            Method: post
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: NONE
+        Confirm:
+          Type: Api
+          Properties:
+            Path: /confirm
+            Method: post
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: NONE
+    Metadata:
+      SamResourceId: AuthFunction
+  PostConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: TodoPostConfirmationHandler
+      CodeUri: PostConfirmationFunction
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      - Statement:
+        - Effect: Allow
+          Action:
+          - sns:Subscribe
+          - sns:ListSubscriptionsByTopic
+          - sns:Publish
+          Resource:
+            Ref: TaskExpiryTopic
+      Environment:
+        Variables:
+          TOPIC_ARN:
+            Ref: TaskExpiryTopic
+    Metadata:
+      SamResourceId: PostConfirmationFunction
+  PostConfirmationInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: PostConfirmationFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - TodoUserPool
+        - Arn
+  CheckExpiredTasksFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CheckExpiredTasks
+      Handler: app.lambda_handler
+      Runtime: python3.13
+      CodeUri: CheckExpiredTasksFunction
+      Policies:
+      - AWSLambdaBasicExecutionRole
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: TodoTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Ref: TaskExpiryTopic
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: TodoTable
+          TOPIC_ARN:
+            Ref: TaskExpiryTopic
+      Events:
+        ScheduledCheck:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 hour)
+    Metadata:
+      SamResourceId: CheckExpiredTasksFunction
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint for the To-Do app
+    Value:
+      Fn::Sub: https://${TodoApi}.execute-api.${AWS::Region}.amazonaws.com/dev
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value:
+      Ref: TodoUserPool
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value:
+      Ref: TodoUserPoolClient
+  TasksTableName:
+    Description: DynamoDB Tasks Table
+    Value:
+      Ref: TodoTable
+  SnsTopicArn:
+    Description: SNS Topic ARN for task expiry notifications
+    Value:
+      Ref: TaskExpiryTopic
