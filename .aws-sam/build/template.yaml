@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Serverless To-Do Application - Working Version
+Description: Serverless To-Do Application - Fixed CORS & Ready to Deploy
 Globals:
   Function:
     Runtime: python3.13
@@ -67,8 +67,7 @@ Resources:
       Cors:
         AllowMethods: '''GET,POST,PUT,DELETE,OPTIONS'''
         AllowHeaders: '''Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'''
-        AllowOrigin: '''*'''
-        AllowCredentials: '''true'''
+        AllowOrigin: '''https://main.d8nrjjr8w3276.amplifyapp.com'''
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
@@ -93,6 +92,15 @@ Resources:
           TABLE_NAME:
             Ref: TodoTable
       Events:
+        TasksOptions:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: options
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: NONE
         GetTasks:
           Type: Api
           Properties:
@@ -145,6 +153,15 @@ Resources:
           CLIENT_ID:
             Ref: TodoUserPoolClient
       Events:
+        AuthOptions:
+          Type: Api
+          Properties:
+            Path: /auth
+            Method: options
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: NONE
         Auth:
           Type: Api
           Properties:
@@ -154,11 +171,29 @@ Resources:
               Ref: TodoApi
             Auth:
               Authorizer: NONE
+        RegisterOptions:
+          Type: Api
+          Properties:
+            Path: /register
+            Method: options
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: NONE
         Register:
           Type: Api
           Properties:
             Path: /register
             Method: post
+            RestApiId:
+              Ref: TodoApi
+            Auth:
+              Authorizer: NONE
+        ConfirmOptions:
+          Type: Api
+          Properties:
+            Path: /confirm
+            Method: options
             RestApiId:
               Ref: TodoApi
             Auth:

@@ -5,16 +5,14 @@ import os
 cognito = boto3.client('cognito-idp')
 client_id = os.environ['CLIENT_ID']
 
-
 print("ENV CLIENT_ID:", os.environ.get("CLIENT_ID"))
 print("client_id var in code:", client_id)
-
 
 def build_response(status_code, body):
     return {
         'statusCode': status_code,
         'headers': {
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': 'https://main.d8nrjjr8w3276.amplifyapp.com',  # Changed from '*' to specific origin
             'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent',
             'Access-Control-Allow-Credentials': 'true'

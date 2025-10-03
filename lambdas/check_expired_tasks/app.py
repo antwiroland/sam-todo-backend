@@ -48,7 +48,7 @@ def lambda_handler(event, context):
                 sns.publish(
                     TopicArn=TOPIC_ARN,
                     Message=f"Your task '{task['TaskName']}' has expired.",
-                    Subject="Task Expired",
+                    Subject="Task Expired", 
                     MessageAttributes={
                         "email": {"DataType": "String", "StringValue": task["UserEmail"]}
                     }

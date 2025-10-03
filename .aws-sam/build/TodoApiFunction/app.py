@@ -7,13 +7,34 @@ from datetime import datetime, timedelta
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(os.environ["TABLE_NAME"])
 
+def build_response(status_code, body):
+    """Helper function to build consistent responses with CORS headers"""
+    return {
+        'statusCode': status_code,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': 'https://main.d8nrjjr8w3276.amplifyapp.com',
+            'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent',
+            'Access-Control-Allow-Credentials': 'true'
+        },
+        'body': json.dumps(body)
+    }
+
 def lambda_handler(event, context):
     print("=== TODO API CALLED ===")
     
+    # Handle OPTIONS preflight request
+    if event.get('httpMethod') == 'OPTIONS':
+        return build_response(200, {'message': 'CORS preflight'})
+    
     # Extract user from Cognito authorizer
-    claims = event['requestContext']['authorizer']['claims']
-    user_id = claims["sub"]
-    user_email = claims.get("email")
+    try:
+        claims = event['requestContext']['authorizer']['claims']
+        user_id = claims["sub"]
+        user_email = claims.get("email")
+    except KeyError:
+        return build_response(401, {'error': 'Unauthorized - missing user claims'})
     
     method = event["httpMethod"]
     path = event["path"]
@@ -27,17 +48,10 @@ def lambda_handler(event, context):
                 KeyConditionExpression=Key("UserId").eq(user_id)
             )
             
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps({
-                    'message': 'Tasks retrieved successfully',
-                    'tasks': response['Items']
-                })
-            }
+            return build_response(200, {
+                'message': 'Tasks retrieved successfully',
+                'tasks': response['Items']
+            })
 
         elif method == "POST" and path == "/tasks":
             # Create new task
@@ -48,14 +62,7 @@ def lambda_handler(event, context):
             expiry_date = datetime.utcnow() + timedelta(hours=expiry_hours)
 
             if not task_id or not task_name:
-                return {
-                    'statusCode': 400,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*'
-                    },
-                    'body': json.dumps({'error': 'TaskId and TaskName are required'})
-                }
+                return build_response(400, {'error': 'TaskId and TaskName are required'})
 
             # Create task item
             task_item = {
@@ -68,20 +75,12 @@ def lambda_handler(event, context):
                 "ExpiryDate": expiry_date.isoformat()  # new field
             }
 
-            
             table.put_item(Item=task_item)
             
-            return {
-                'statusCode': 201,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps({
-                    'message': 'Task created successfully',
-                    'task': task_item
-                })
-            }
+            return build_response(201, {
+                'message': 'Task created successfully',
+                'task': task_item
+            })
 
         elif method == "PUT" and path == "/tasks":
             body = json.loads(event["body"])
@@ -90,11 +89,7 @@ def lambda_handler(event, context):
             new_name = body.get("TaskName")
 
             if not task_id:
-                return {
-                    'statusCode': 400,
-                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                    'body': json.dumps({'error': 'TaskId is required'})
-                }
+                return build_response(400, {'error': 'TaskId is required'})
 
             update_expression = []
             expression_values = {}
@@ -109,11 +104,7 @@ def lambda_handler(event, context):
                 expression_values[":n"] = new_name
 
             if not update_expression:
-                return {
-                    'statusCode': 400,
-                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                    'body': json.dumps({'error': 'Nothing to update'})
-                }
+                return build_response(400, {'error': 'Nothing to update'})
 
             table.update_item(
                 Key={"UserId": user_id, "TaskId": task_id},
@@ -123,58 +114,27 @@ def lambda_handler(event, context):
                 ReturnValues="ALL_NEW"
             )
 
-            return {
-                'statusCode': 200,
-                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'message': f'Task {task_id} updated successfully'})
-            }
+            return build_response(200, {'message': f'Task {task_id} updated successfully'})
 
-        
         elif method == "DELETE" and path == "/tasks":
             # Delete task
             body = json.loads(event["body"])
             task_id = body.get("TaskId")
 
             if not task_id:
-                return {
-                    'statusCode': 400,
-                    'headers': {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*'
-                    },
-                    'body': json.dumps({'error': 'TaskId is required'})
-                }
+                return build_response(400, {'error': 'TaskId is required'})
 
             table.delete_item(
                 Key={"UserId": user_id, "TaskId": task_id}
             )
 
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps({'message': f'Task {task_id} deleted successfully'})
-            }
+            return build_response(200, {'message': f'Task {task_id} deleted successfully'})
 
         else:
-            return {
-                'statusCode': 404,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps({'error': 'Endpoint not found'})
-            }
+            return build_response(404, {'error': 'Endpoint not found'})
 
+    except json.JSONDecodeError:
+        return build_response(400, {'error': 'Invalid JSON in request body'})
     except Exception as e:
         print(f"Error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            'body': json.dumps({'error': f'Internal server error: {str(e)}'})
-        }
+        return build_response(500, {'error': f'Internal server error: {str(e)}'})
